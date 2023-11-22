@@ -1627,6 +1627,7 @@ AssertionResult EqSuccess(const char* lhs_expression,
                           const std::string& lhs_value,
                           const std::string& rhs_value, bool ignoring_case) {
   Message msg;
+  printf("%s\n", "[DEBUG] I'm going into EqSuccess");
   msg << "Expected equality of these values:";
   msg << "\n  " << lhs_expression;
   if (lhs_value != lhs_expression) {
