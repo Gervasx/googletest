@@ -1622,6 +1622,38 @@ AssertionResult EqFailure(const char* lhs_expression,
   return AssertionFailure() << msg;
 }
 
+AssertionResult EqSuccess(const char* lhs_expression,
+                          const char* rhs_expression,
+                          const std::string& lhs_value,
+                          const std::string& rhs_value, bool ignoring_case) {
+  Message msg;
+  printf("%s\n", "[DEBUG] I'm going into EqSuccess");
+  msg << "Expected equality of these values:";
+  msg << "\n  " << lhs_expression;
+  if (lhs_value != lhs_expression) {
+    msg << "\n    Which is: " << lhs_value;
+  }
+  msg << "\n  " << rhs_expression;
+  if (rhs_value != rhs_expression) {
+    msg << "\n    Which is: " << rhs_value;
+  }
+
+  if (ignoring_case) {
+    msg << "\nIgnoring case";
+  }
+
+  if (!lhs_value.empty() && !rhs_value.empty()) {
+    const std::vector<std::string> lhs_lines = SplitEscapedString(lhs_value);
+    const std::vector<std::string> rhs_lines = SplitEscapedString(rhs_value);
+    if (lhs_lines.size() > 1 || rhs_lines.size() > 1) {
+      msg << "\nWith diff:\n"
+          << edit_distance::CreateUnifiedDiff(lhs_lines, rhs_lines);
+    }
+  }
+
+  return AssertionSuccess() << msg;
+}
+
 // Constructs a failure message for Boolean assertions such as EXPECT_TRUE.
 std::string GetBoolAssertionFailureMessage(
     const AssertionResult& assertion_result, const char* expression_text,
@@ -1679,21 +1711,6 @@ AssertionResult DoubleNearPredFormat(const char* expr1, const char* expr2,
 template <typename RawType>
 AssertionResult FloatingPointLE(const char* expr1, const char* expr2,
                                 RawType val1, RawType val2) {
-  // Returns success if val1 is less than val2,
-  if (val1 < val2) {
-    return AssertionSuccess();
-  }
-
-  // or if val1 is almost equal to val2.
-  const FloatingPoint<RawType> lhs(val1), rhs(val2);
-  if (lhs.AlmostEquals(rhs)) {
-    return AssertionSuccess();
-  }
-
-  // Note that the above two checks will both fail if either val1 or
-  // val2 is NaN, as the IEEE floating-point standard requires that
-  // any predicate involving a NaN must return false.
-
   ::std::stringstream val1_ss;
   val1_ss << std::setprecision(std::numeric_limits<RawType>::digits10 + 2)
           << val1;
@@ -1701,6 +1718,27 @@ AssertionResult FloatingPointLE(const char* expr1, const char* expr2,
   ::std::stringstream val2_ss;
   val2_ss << std::setprecision(std::numeric_limits<RawType>::digits10 + 2)
           << val2;
+  // Returns success if val1 is less than val2,
+  if (val1 < val2) {
+    return AssertionSuccess()
+    << "Expected: (" << expr1 << ") <= (" << expr2 << ")\n"
+         << "  Actual: " << StringStreamToString(&val1_ss) << " vs "
+         << StringStreamToString(&val2_ss);
+  }
+
+  // or if val1 is almost equal to val2.
+  const FloatingPoint<RawType> lhs(val1), rhs(val2);
+  if (lhs.AlmostEquals(rhs)) {
+    return AssertionSuccess()
+    << "Expected: (" << expr1 << ") <= (" << expr2 << ")\n"
+         << "  Actual: " << StringStreamToString(&val1_ss) << " vs "
+         << StringStreamToString(&val2_ss);
+  }
+
+  // Note that the above two checks will both fail if either val1 or
+  // val2 is NaN, as the IEEE floating-point standard requires that
+  // any predicate involving a NaN must return false.
+
 
   return AssertionFailure()
          << "Expected: (" << expr1 << ") <= (" << expr2 << ")\n"
@@ -1731,7 +1769,9 @@ AssertionResult CmpHelperSTREQ(const char* lhs_expression,
                                const char* rhs_expression, const char* lhs,
                                const char* rhs) {
   if (String::CStringEquals(lhs, rhs)) {
-    return AssertionSuccess();
+    // Add output on Success Equals
+    return EqSuccess(lhs_expression, rhs_expression, PrintToString(lhs),
+                   PrintToString(rhs), false);
   }
 
   return EqFailure(lhs_expression, rhs_expression, PrintToString(lhs),
@@ -1743,7 +1783,9 @@ AssertionResult CmpHelperSTRCASEEQ(const char* lhs_expression,
                                    const char* rhs_expression, const char* lhs,
                                    const char* rhs) {
   if (String::CaseInsensitiveCStringEquals(lhs, rhs)) {
-    return AssertionSuccess();
+    // Add output on Success Equals
+    return EqSuccess(lhs_expression, rhs_expression, PrintToString(lhs),
+                   PrintToString(rhs), false);
   }
 
   return EqFailure(lhs_expression, rhs_expression, PrintToString(lhs),
@@ -1755,7 +1797,10 @@ AssertionResult CmpHelperSTRNE(const char* s1_expression,
                                const char* s2_expression, const char* s1,
                                const char* s2) {
   if (!String::CStringEquals(s1, s2)) {
-    return AssertionSuccess();
+    // Add output on Success Equals
+    return AssertionSuccess()
+          << "Expected: (" << s1_expression << ") != (" << s2_expression
+           << "), actual: \"" << s1 << "\" vs \"" << s2 << "\"";
   } else {
     return AssertionFailure()
            << "Expected: (" << s1_expression << ") != (" << s2_expression
@@ -1768,7 +1813,8 @@ AssertionResult CmpHelperSTRCASENE(const char* s1_expression,
                                    const char* s2_expression, const char* s1,
                                    const char* s2) {
   if (!String::CaseInsensitiveCStringEquals(s1, s2)) {
-    return AssertionSuccess();
+    return AssertionSuccess() << "Expected: (" << s1_expression << ") != (" << s2_expression
+           << ") (ignoring case), actual: \"" << s1 << "\" vs \"" << s2 << "\"";;
   } else {
     return AssertionFailure()
            << "Expected: (" << s1_expression << ") != (" << s2_expression
@@ -1814,11 +1860,16 @@ AssertionResult IsSubstringImpl(bool expected_to_be_substring,
                                 const char* haystack_expr,
                                 const StringType& needle,
                                 const StringType& haystack) {
-  if (IsSubstringPred(needle, haystack) == expected_to_be_substring)
-    return AssertionSuccess();
-
   const bool is_wide_string = sizeof(needle[0]) > 1;
   const char* const begin_string_quote = is_wide_string ? "L\"" : "\"";
+  if (IsSubstringPred(needle, haystack) == expected_to_be_substring)
+    return AssertionSuccess()
+         << "Value of: " << needle_expr << "\n"
+         << "  Actual: " << begin_string_quote << needle << "\"\n"
+         << "Expected: " << (expected_to_be_substring ? "" : "not ")
+         << "a substring of " << haystack_expr << "\n"
+         << "Which is: " << begin_string_quote << haystack << "\"";
+
   return AssertionFailure()
          << "Value of: " << needle_expr << "\n"
          << "  Actual: " << begin_string_quote << needle << "\"\n"
@@ -2103,7 +2154,8 @@ AssertionResult CmpHelperSTREQ(const char* lhs_expression,
                                const char* rhs_expression, const wchar_t* lhs,
                                const wchar_t* rhs) {
   if (String::WideCStringEquals(lhs, rhs)) {
-    return AssertionSuccess();
+    return EqSuccess(lhs_expression, rhs_expression, PrintToString(lhs),
+                   PrintToString(rhs), false);
   }
 
   return EqFailure(lhs_expression, rhs_expression, PrintToString(lhs),
@@ -2115,7 +2167,8 @@ AssertionResult CmpHelperSTRNE(const char* s1_expression,
                                const char* s2_expression, const wchar_t* s1,
                                const wchar_t* s2) {
   if (!String::WideCStringEquals(s1, s2)) {
-    return AssertionSuccess();
+    return AssertionSuccess()<< "Expected: (" << s1_expression << ") != (" << s2_expression
+         << "), actual: " << PrintToString(s1) << " vs " << PrintToString(s2);
   }
 
   return AssertionFailure()
@@ -4300,6 +4353,17 @@ void XmlUnitTestResultPrinter::OutputXmlTestResult(::std::ostream* stream,
       const std::string detail = location + "\n" + part.message();
       OutputXmlCDataSection(stream, RemoveInvalidXmlCharacters(detail).c_str());
       *stream << "</skipped>\n";
+    } else
+    {
+      const std::string location =
+          internal::FormatCompilerIndependentFileLocation(part.file_name(),
+                                                          part.line_number());
+      const std::string summary = location + "\n" + part.summary();
+      *stream << "      <success message=\"" << EscapeXmlAttribute(summary)
+              << "\" type=\"\">";
+      const std::string detail = location + "\n" + part.message();
+      OutputXmlCDataSection(stream, RemoveInvalidXmlCharacters(detail).c_str());
+      *stream << "</success>\n";
     }
   }
 
